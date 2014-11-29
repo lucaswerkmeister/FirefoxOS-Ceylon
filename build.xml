@@ -1,0 +1,193 @@
+<project name="FirefoxOS-Ceylon" basedir="." default="copy">
+    
+    <property file="build.properties"/>
+    <property name="ceylon.verbosity" value="false"/>
+    <property name="ceylon.executable" value="${dist.bin.dir}/ceylon"/>
+    <property name="out.repo" location="modules"/>
+    
+    <taskdef resource="net/sf/antcontrib/antcontrib.properties">
+        <classpath>
+            <pathelement location="${dist.root.dir}/lib/ant-contrib-1.0b3.jar"/>
+        </classpath>
+    </taskdef>
+    
+    <taskdef resource="taskdef.properties">
+        <classpath>
+            <pathelement path="${dist.root.dir}/osgi/lib/org.osgi.impl.bundle.repoindex.ant-2.1.2.jar"/>
+        </classpath>
+    </taskdef>
+    
+    <property name="ceylon.repo.dir" location="${user.home}/.ceylon/repo"/>
+    
+    <path id="ant-tasks">
+        <pathelement location="${ceylon.ant.lib}"/>
+    </path>
+    
+    <typedef resource="com/redhat/ceylon/ant/antlib.xml" classpathref="ant-tasks"/>
+    
+    <property name="ceylon.name" value="firefoxos"/>
+    <property name="ceylon.version" value="1.0.0"/>
+    
+    <moduleset id="modules.source">
+        <module name="${ceylon.name}"/>
+    </moduleset>
+    
+    <moduleset id="modules.test">
+        <module name="test.${ceylon.name}"/>
+    </moduleset>
+    
+    <moduleset id="modules.all">
+        <moduleset refid="modules.source"/>
+        <moduleset refid="modules.test"/>
+    </moduleset>
+    
+    
+    <target name="clean"
+            description="Deletes the modules directory">
+        <delete dir="${out.repo}"/>
+    </target>
+    
+    <target name="compile-source"
+            description="Compiles the source modules">
+        <ceylon-compile-js executable="${ceylon.executable}"
+            verbose="${ceylon.verbosity}"
+            encoding="UTF-8"
+            out="${out.repo}">
+            <moduleset refid="modules.source"/>
+        </ceylon-compile-js>
+    </target>
+    
+    <target name="compile-test" depends="compile-source"
+            description="Compiles the test modules">
+        <ceylon-compile-js executable="${ceylon.executable}"
+            verbose="${ceylon.verbosity}"
+            encoding="UTF-8"
+            out="${out.repo}">
+            <moduleset refid="modules.test"/>
+        </ceylon-compile-js>
+    </target>
+    
+    <target name="compile"
+            description="Compiles all modules">
+        <ceylon-compile-js executable="${ceylon.executable}"
+            verbose="${ceylon.verbosity}"
+            encoding="UTF-8"
+            out="${out.repo}">
+            <moduleset refid="modules.all"/>
+        </ceylon-compile-js>
+    </target>
+    
+    <target name="test" depends="compile"
+            description="Runs the tests">
+        <ceylon-test>
+            <moduleset refid="modules.test"/>
+        </ceylon-test>
+    </target>
+
+    <target name="doc" 
+            description="Documents all modules">
+        <ceylon-doc executable="${ceylon.executable}"
+            includesourcecode="true"
+            nomtimecheck="true"
+            out="${out.repo}"
+            encoding="UTF-8">
+            <moduleset refid="modules.source"/>
+            <linkset>
+                <link pattern="ceylon" url="https://modules.ceylon-lang.org/repo/1/"/>
+            </linkset>
+        </ceylon-doc>
+    </target>
+    
+    <target name="copy" depends="compile-source"
+            description="Copies the modules and dependencies to the libs directory">
+        <ceylon-copy out="js/libs" withDependencies="true">
+            <module name="${ceylon.name}" version="${ceylon.version}"/>
+            <!-- can’t be <moduleset refid="modules.source"/>, because that doesn’t have a version –
+                 and can’t have one, because ceylon-compile-js doesn’t like that -->
+        </ceylon-copy>
+        <!-- ceylon-copy doesn’t include the language module as dependency,
+             and if we include that explicitly, it copies tons of Java dependencies as well,
+             so we just copy that manually. -->
+        <copy todir="js/libs/ceylon/language/1.1.0">
+            <fileset dir="${ceylon.repo.dir}/ceylon/language/1.1.0">
+                <include name="*.js"/>
+            </fileset>
+        </copy>
+    </target>
+    
+    <target name="fetch-requirejs"
+            description="Downloads require.js into the libs directory">
+        <mkdir dir="js/libs"/>
+        <get src="http://requirejs.org/docs/release/2.1.15/minified/require.js"
+             dest="js/libs/"/>
+    </target>
+    
+    <target name="change-name"
+            description="Renames the Ceylon modules to the name given with the ceylon.name.new variable">
+        <fail unless="ceylon.name.new" message="Please specify a new name with -Dceylon.name.new=..."/>
+        
+        <!-- Hack to change x.y.z to x/y/z – see http://stackoverflow.com/a/10859103/1420237 -->
+        <script language="javascript"><![CDATA[
+            var ceylonName = project.getProperty("ceylon.name");
+            var ceylonNameNew = project.getProperty("ceylon.name.new");
+            project.setProperty("path.ceylon.name", ceylonName.replaceAll("\\.", "/"));
+            project.setProperty("path.ceylon.name.new", ceylonNameNew.replaceAll("\\.", "/"));
+        ]]></script>
+        <!-- Now we have the x/y/z variants in ${path.ceylon.name(.new)} -->
+        
+        <!-- 1. Replace path with new path in app.js.
+             The line in app.js looks like this:
+             
+                 require(["ceylon.language...", "firefoxos/1.0.0/firefoxos-1.0.0"], function(lang, mod) { ...
+             
+             The first occurrence of “firefoxos” means the *path*, while the second one means the *module name*.
+             Thus, we first `sed` it *without* the `g` flag, replacing only the path occurrence. -->
+        <exec executable="sed">
+            <arg value="-i"/>
+            <arg value="s ${path.ceylon.name} ${path.ceylon.name.new} "/>
+            <arg value="js/app.js"/>
+        </exec>
+        
+        <!-- 2. Replace name with new name everywhere. -->
+        <exec executable="sed">
+            <arg value="-i"/>
+            <arg value="s ${ceylon.name} ${ceylon.name.new} g"/>
+            <arg value="build.xml"/>
+            <arg value="source/${path.ceylon.name}/module.ceylon"/>
+            <arg value="source/${path.ceylon.name}/package.ceylon"/>
+            <arg value="source/${path.ceylon.name}/Document.ceylon"/>
+            <arg value="source/${path.ceylon.name}/native/package.ceylon"/>
+            <arg value="source/${path.ceylon.name}/native/document.ceylon"/>
+            <arg value="source/test/${path.ceylon.name}/module.ceylon"/>
+            <arg value="source/test/${path.ceylon.name}/package.ceylon"/>
+            <arg value="js/app.js"/>
+        </exec>
+        
+        <!-- 3. Move source directories. -->
+        <move file="source/${path.ceylon.name}" tofile="source/${path.ceylon.name.new}"/>
+        <move file="source/test/${path.ceylon.name}" tofile="source/test/${path.ceylon.name.new}"/>
+    </target>
+    
+    <target name="change-version"
+            description="Changes the version of the Ceylon modules to the version given with the ceylon.version.new variable">
+        <fail unless="ceylon.version.new" message="Please specify a new version with -Dceylon.version.new=..."/>
+        
+        <!-- Hack to change x.y.z to x/y/z – see http://stackoverflow.com/a/10859103/1420237 -->
+        <script language="javascript"><![CDATA[
+            var ceylonName = project.getProperty("ceylon.name");
+            var ceylonNameNew = project.getProperty("ceylon.name.new");
+            project.setProperty("path.ceylon.name", ceylonName.replaceAll("\\.", "/"));
+        ]]></script>
+        <!-- Now we have the x/y/z variant in ${path.ceylon.name} -->
+        
+        <exec executable="sed">
+            <arg value="-i"/>
+            <arg value="s ${ceylon.version} ${ceylon.version.new} g"/>
+            <arg value="build.xml"/>
+            <arg value="source/${path.ceylon.name}/module.ceylon"/>
+            <arg value="source/test/${path.ceylon.name}/module.ceylon"/>
+            <arg value="js/app.js"/>
+        </exec>
+    </target>
+    
+</project>

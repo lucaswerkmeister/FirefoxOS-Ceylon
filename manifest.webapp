@@ -1,0 +1,20 @@
+{
+  "version": "0.1.0",
+  "name": "FirefoxOS-Ceylon",
+  "description": "A template with some Ceylon setup",
+  "launch_path": "/index.html",
+  "icons": {
+    "512": "/img/icons/ceylon_icon_512.png",
+    "128": "/img/icons/ceylon_icon_128.png"
+  },
+  "developer": {
+    "name": "Your name",
+    "url": "http://example.com"
+  },
+  "type": "privileged",
+  "permissions": {},
+  "installs_allowed_from": [
+    "*"
+  ],
+  "default_locale": "en"
+}
